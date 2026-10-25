@@ -1,0 +1,89 @@
+name: Materialize and verify project
+
+on:
+  push:
+    paths:
+      - ".github/workflows/materialize-project.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Restore exact prepared project and remove transfer files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import io
+          import lzma
+          import shutil
+          import tarfile
+          from pathlib import Path, PurePosixPath
+
+          root = Path.cwd()
+          parts = [root / ".bootstrap" / f"xz-{i:02d}.b64" for i in range(5)]
+          if not all(part.is_file() for part in parts):
+              raise SystemExit("The verified source bundle is incomplete.")
+          encoded = "".join(part.read_text(encoding="ascii") for part in parts)
+          compressed = base64.b64decode(encoded, validate=True)
+          expected = "2739bace9b959d48f3d0557a8b87f6c39b6a99a343f40a47085671a37f31b7f6"
+          actual = hashlib.sha256(compressed).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"Source archive hash mismatch: {actual}")
+          tar_bytes = lzma.decompress(compressed)
+          with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as archive:
+              members = archive.getmembers()
+              expected_names = {
+                  ".gitignore", "LICENSE", "README.md", "business-inquiry-auto-reply.json",
+                  "package.json", "test-report.md", "docs/airtable-schema.md",
+                  "original-workflow/AI-Lead-Follow-Up-Agent.original.json",
+                  "scripts/validate_workflow.py", "tests/fixtures/inquiries.json",
+                  "tests/workflow.test.js",
+              }
+              names = {member.name for member in members if member.isfile()}
+              if names != expected_names:
+                  raise SystemExit(f"Unexpected source archive contents: {sorted(names)}")
+              for member in members:
+                  name = PurePosixPath(member.name)
+                  if name.is_absolute() or ".." in name.parts or not member.isfile():
+                      raise SystemExit(f"Unsafe/unexpected archive entry: {member.name}")
+                  extracted = archive.extractfile(member)
+                  if extracted is None:
+                      raise SystemExit(f"Could not read archive entry: {member.name}")
+                  target = root.joinpath(*name.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(extracted.read())
+          shutil.rmtree(root / ".bootstrap")
+          shutil.rmtree(root / ".github", ignore_errors=True)
+          print(f"Restored {len(expected_names)} project files from verified SHA-256 {actual}")
+          PY
+
+      - name: Run automated tests
+        run: |
+          npm test
+          npm run validate
+
+      - name: Commit complete project
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to publish."
+            exit 0
+          fi
+          git commit -m "Publish complete business inquiry automation project"
+          git push origin HEAD:main
