@@ -2,7 +2,6 @@
 
 A customized n8n workflow derived from the upstream [AI Lead Follow-Up Agent](https://github.com/GBAnjos/n8n-lead-agent). It keeps the original form/email intake paths, Claude HTTP requests, score-based qualification, Gmail delivery, and Airtable CRM while adding webhook intake, intent classification/routing, stricter input and AI-output validation, and explicit error-to-review paths.
 
-> **Operational status:** the workflow JSON and local regression checks are prepared. Live email/CRM/AI execution requires credentials and an Airtable base owned by the operator; those cannot be embedded in a portable public workflow. No external integration has been represented as live-tested here.
 
 ## Included files
 
