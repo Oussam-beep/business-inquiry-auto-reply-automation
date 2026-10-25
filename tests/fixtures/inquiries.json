@@ -1,0 +1,32 @@
+{
+  "valid_sales": {
+    "name": "Test Customer",
+    "email": "customer@example.com",
+    "phone": "555-0100",
+    "message": "I am interested in your services for a new project."
+  },
+  "valid_pricing": {
+    "name": "Pricing Customer",
+    "email": "pricing@example.com",
+    "phone": "",
+    "message": "How much does this service cost? Please send pricing information."
+  },
+  "valid_support": {
+    "name": "Existing Customer",
+    "email": "support@example.com",
+    "phone": "555-0101",
+    "message": "I need help with a service I already purchased."
+  },
+  "spam": {
+    "name": "Spam Sender",
+    "email": "sender@example.com",
+    "phone": "",
+    "message": "Buy fake followers and crypto tokens now."
+  },
+  "general": {
+    "name": "General Customer",
+    "email": "general@example.com",
+    "phone": "",
+    "message": "What areas do you serve?"
+  }
+}

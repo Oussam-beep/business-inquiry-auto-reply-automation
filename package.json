@@ -1,0 +1,10 @@
+{
+  "name": "business-inquiry-auto-reply-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "n8n workflow customization with static and mocked regression tests",
+  "scripts": {
+    "test": "node tests/workflow.test.js",
+    "validate": "python scripts/validate_workflow.py"
+  }
+}

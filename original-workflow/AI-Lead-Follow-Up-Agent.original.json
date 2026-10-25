@@ -1,0 +1,670 @@
+{
+  "name": "AI Lead Follow-Up Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Setup (once)\n1. Credentials → add **Anthropic** (API key)\n2. Credentials → add **Gmail OAuth2** (sender account)\n3. Credentials → add **Airtable Personal Access Token**\n4. Airtable base **Lead Agent**, table **Leads** with fields:\n   name | timestamp | email | phone | message | score | category | summary | status | reply_subject\n5. Open the **three Airtable nodes** (Dupe Check + both Log Lead) → pick base + table\n6. Open **Normalize Lead** → set business_name, sender_name, booking_url\n7. Activate, open the Form URL, submit a test lead 🚀\n\n📺 60-sec demo + guided setup: https://lead-agent.guilhermecbanjos.workers.dev",
+        "height": 340,
+        "width": 380
+      },
+      "id": "sticky-setup",
+      "name": "Sticky Note — Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Demo tips\n- Test leads to submit (from demo-script.md):\n  HOT: \"Burst pipe in my kitchen, need someone TODAY, budget no issue\"\n  WARM: \"Thinking about renovating a bathroom sometime this year, ballpark?\"\n  COLD: \"Do you want to buy SEO services for your website?\"\n- Cost tip: switch the Qualify node's model to claude-haiku-4-5-20251001 (cheaper) — keep Sonnet for the reply.\n- The Gmail Trigger (email intake) ships disabled — enable it after connecting Gmail if you want email leads too.",
+        "height": 300,
+        "width": 380
+      },
+      "id": "sticky-tips",
+      "name": "Sticky Note — Demo tips",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Atlas Home Services — Get a Quote",
+        "formDescription": "Tell us what you need and we'll get back to you within minutes.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Phone"
+            },
+            {
+              "fieldLabel": "What do you need?",
+              "fieldType": "textarea",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "form-trigger",
+      "name": "Lead Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -200,
+        0
+      ],
+      "webhookId": ""
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {},
+        "options": {}
+      },
+      "id": "gmail-trigger",
+      "name": "Email Lead (optional)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -200,
+        220
+      ],
+      "disabled": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map an inbound email into the same lead shape as the form\nconst m = $input.first().json;\nconst fromRaw = m.from?.value?.[0] || {};\nconst name = fromRaw.name || (typeof m.from === 'string' ? m.from : '') || 'Unknown';\nconst email = fromRaw.address || m.From || '';\nconst message = `${m.subject || ''} — ${m.text || m.snippet || ''}`.slice(0, 2000);\nreturn [{ json: { Name: name, Email: email, Phone: '', 'What do you need?': message } }];"
+      },
+      "id": "normalize-email",
+      "name": "Email → Lead shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "name",
+              "value": "={{ $json.Name || $json.name || 'Unknown' }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "email",
+              "value": "={{ $json.Email || $json.email || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "phone",
+              "value": "={{ $json.Phone || $json.phone || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "message",
+              "value": "={{ $json['What do you need?'] || $json.message || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "business_name",
+              "value": "Atlas Home Services",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "sender_name",
+              "value": "Alex",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "booking_url",
+              "value": "https://cal.com/your-handle/intro",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalize-lead",
+      "name": "Normalize Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 500, system: 'You qualify inbound leads for ' + $json.business_name + ', a services business. Score the lead 1-10 for likelihood to become a paying customer (10 = clear budget, urgent need, right service; 1 = spam or irrelevant). Respond with ONLY minified JSON, no markdown fences: {\"score\":<number>,\"category\":\"hot|warm|cold\",\"summary\":\"<one sentence>\",\"reason\":\"<one sentence>\"}', messages: [{ role: 'user', content: 'New lead:\\nName: ' + $json.name + '\\nEmail: ' + $json.email + '\\nPhone: ' + ($json.phone || 'n/a') + '\\nMessage: ' + $json.message }] }) }}",
+        "options": {}
+      },
+      "id": "qualify-claude",
+      "name": "Qualify Lead (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        0
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's qualification JSON (with fallback) and merge with the lead\nconst res = $input.first().json;\nlet text = res.content?.[0]?.text ?? '';\ntext = text.trim().replace(/^```(json)?/i, '').replace(/```$/, '').trim();\nlet q;\ntry { q = JSON.parse(text); }\ncatch (e) { q = { score: 5, category: 'warm', summary: text.slice(0, 200), reason: 'parse-fallback' }; }\nq.score = Number(q.score) || 0;\nconst lead = $('Normalize Lead').first().json;\nreturn [{ json: { ...lead, ...q } }];"
+      },
+      "id": "parse-qualification",
+      "name": "Parse Qualification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 6,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-qualified",
+      "name": "Qualified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 700, system: 'You are ' + $json.sender_name + ', the owner of ' + $json.business_name + ', personally replying to an inbound lead. Write in the FIRST person (I/we) — never refer to ' + $json.sender_name + ' in the third person. Tone: warm, brief, professional, no hype, no emojis. Goal: get the lead to book a call at this exact link: ' + $json.booking_url + ' — mention it once, naturally, in the body. Do NOT add any sign-off, name or signature at the end — a signature is appended automatically after your last sentence. Respond with ONLY minified JSON, no markdown fences: {\"subject\":\"<email subject>\",\"body\":\"<plain-text email body>\"}', messages: [{ role: 'user', content: 'Lead name: ' + $json.name + '\\nLead message: ' + $json.message + '\\nQualification summary: ' + $json.summary + '\\nCategory: ' + $json.category }] }) }}",
+        "options": {}
+      },
+      "id": "draft-reply-claude",
+      "name": "Draft Reply (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        -100
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's reply JSON (with fallback) and merge everything\nconst res = $input.first().json;\nlet text = res.content?.[0]?.text ?? '';\ntext = text.trim().replace(/^```(json)?/i, '').replace(/```$/, '').trim();\nlet r;\ntry { r = JSON.parse(text); }\ncatch (e) { r = { subject: 'Thanks for reaching out', body: text }; }\nconst lead = $('Parse Qualification').first().json;\nreturn [{ json: { ...lead, reply_subject: r.subject, reply_body: r.body } }];"
+      },
+      "id": "parse-reply",
+      "name": "Parse Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.reply_subject }}",
+        "emailType": "text",
+        "message": "={{ $json.reply_body }}\n\n{{ $json.sender_name }}\n{{ $json.business_name }}\nBook a call: {{ $json.booking_url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "send-reply",
+      "name": "Send Reply (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2220,
+        -100
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "record",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": ""
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "name": "={{ $('Parse Reply').item.json.name }}",
+            "email": "={{ $('Parse Reply').item.json.email }}",
+            "phone": "={{ $('Parse Reply').item.json.phone }}",
+            "message": "={{ $('Parse Reply').item.json.message }}",
+            "score": "={{ $('Parse Reply').item.json.score }}",
+            "category": "={{ $('Parse Reply').item.json.category }}",
+            "summary": "={{ $('Parse Reply').item.json.summary }}",
+            "status": "replied",
+            "reply_subject": "={{ $('Parse Reply').item.json.reply_subject }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "typecast": true
+        }
+      },
+      "id": "log-replied",
+      "name": "Log Lead — replied",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        2440,
+        -100
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "",
+          "name": "Airtable PAT (Lead Agent)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "record",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": ""
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": ""
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "name": "={{ $json.name }}",
+            "email": "={{ $json.email }}",
+            "phone": "={{ $json.phone }}",
+            "message": "={{ $json.message }}",
+            "score": "={{ $json.score }}",
+            "category": "={{ $json.category }}",
+            "summary": "={{ $json.summary }}",
+            "status": "manual review",
+            "reply_subject": ""
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "typecast": true
+        }
+      },
+      "id": "log-manual",
+      "name": "Log Lead — manual review",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1780,
+        120
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "",
+          "name": "Airtable PAT (Lead Agent)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "record",
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": ""
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "",
+          "cachedResultName": ""
+        },
+        "filterByFormula": "=AND({email} = '{{ $json.email }}', {status} = 'replied', IS_AFTER({timestamp}, DATEADD(NOW(), -1, 'days')))",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "id": "dupe-check",
+      "name": "Dupe Check (Airtable)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        460,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "",
+          "name": "Airtable PAT (Lead Agent)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-duplicate",
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Duplicate guard passed — restore the normalized lead shape for the Claude nodes\nreturn [{ json: $('Normalize Lead').first().json }];"
+      },
+      "id": "restore-lead",
+      "name": "Restore Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Lead Form": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Lead (optional)": {
+      "main": [
+        [
+          {
+            "node": "Email → Lead shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email → Lead shape": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead": {
+      "main": [
+        [
+          {
+            "node": "Dupe Check (Airtable)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualify Lead (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Parse Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Qualification": {
+      "main": [
+        [
+          {
+            "node": "Qualified?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualified?": {
+      "main": [
+        [
+          {
+            "node": "Draft Reply (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Lead — manual review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Reply (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Parse Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Reply (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reply (Gmail)": {
+      "main": [
+        [
+          {
+            "node": "Log Lead — replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dupe Check (Airtable)": {
+      "main": [
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Restore Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Lead": {
+      "main": [
+        [
+          {
+            "node": "Qualify Lead (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,98 +1,129 @@
 # Business Inquiry Auto-Reply Automation
 
-A focused customization of the upstream n8n AI Lead Follow-Up Agent. The workflow keeps the existing form/email intake, Claude qualification and reply generation, Gmail delivery, and Airtable CRM logging while adding a JSON webhook, input validation, intent-based routing, stricter parsing, and explicit failure-review paths.
+A customized n8n workflow derived from the upstream [AI Lead Follow-Up Agent](https://github.com/GBAnjos/n8n-lead-agent). It keeps the original form/email intake paths, Claude HTTP requests, score-based qualification, Gmail delivery, and Airtable CRM while adding webhook intake, intent classification/routing, stricter input and AI-output validation, and explicit error-to-review paths.
 
-**Status:** Source files and local tests are prepared. A live n8n import and calls to Anthropic, Gmail, and Airtable must still be tested in an operator-owned environment. No credentials or secrets are included in this repository.
+> **Operational status:** the workflow JSON and local regression checks are prepared. Live email/CRM/AI execution requires credentials and an Airtable base owned by the operator; those cannot be embedded in a portable public workflow. No external integration has been represented as live-tested here.
 
-## What is included
+## Included files
 
-- `business-inquiry-auto-reply.json` — workflow to import into n8n.
-- `original-workflow/AI-Lead-Follow-Up-Agent.original.json` — untouched upstream workflow backup.
-- `docs/airtable-schema.md` — field names and values expected by the workflow.
-- `tests/` — mocked regression tests and example inquiries.
-- `scripts/validate_workflow.py` — structural validation checks.
-- `test-report.md` — executed local checks and unverified live tests.
+- `business-inquiry-auto-reply.json` — modified workflow to import into n8n.
+- `original-workflow/AI-Lead-Follow-Up-Agent.original.json` — untouched original workflow backup.
+- `docs/airtable-schema.md` — exact CRM fields and types required by the mappings.
+- `tests/workflow.test.js` and `tests/fixtures/inquiries.json` — local mocked regression tests and sample inquiries.
+- `scripts/validate_workflow.py` — structural, expression, connection, and secret-pattern checks.
+- `test-report.md` — clear distinction between local checks and unexecuted live integration tests.
 
-## Workflow overview
+## Processing architecture
 
-Form trigger, optional Gmail trigger, and POST webhook converge on the same lead normalization and validation path. Valid inquiries are checked against Airtable for a matching email marked as replied during the previous 24 hours. New inquiries are qualified by Claude, parsed against a strict schema, and routed by intent. Qualified sales, pricing, and general inquiries continue through reply drafting and a validation gate before Gmail delivery. Support and uncertain inquiries go to manual review; spam is logged and suppressed. Qualification, reply-drafting, and delivery errors route to review logging.
+```text
+Form trigger ───────────────┐
+Optional Gmail trigger → map ├→ Normalize Lead → Validate required fields
+POST webhook ───────────────┘                         │
+                                      invalid ───────┴→ Airtable manual/rejection log
+                                                    │ valid
+                                             Airtable duplicate check (24h)
+                                                    │
+                                       duplicate → suppressed log / stop
+                                                    │ new inquiry
+                                             Claude qualification
+                                                    │
+                                             strict JSON parser
+                                                    │
+                                                intent switch
+                                   ┌─────────┬─────────┬─────────┬────────┐
+                                   sales   pricing   general  support   spam
+                                     └──────────┬──────────┘    │        │
+                                       score ≥ 6?             review   suppress
+                                         ┌──────┴──────┐
+                                     qualify        manual review
+                                         │
+                                  Claude reply draft
+                                         │
+                                    reply JSON gate
+                                         │ valid
+                                    Gmail send (no retry)
+                                         │
+                                   Airtable replied log
 
-## Webhook request
+AI qualification, reply-generation, and email-delivery failures route to manual-review logging.
+```
 
-After import, configuration, and activation, use the Production URL displayed by the Webhook node. The path is /webhook/business-inquiry and the method is POST. Send JSON with these fields:
+## Webhook API
 
-~~~json
+After importing, configuring credentials/resources, and activating the workflow, copy the **Production URL** from the Webhook node; its path is `/webhook/business-inquiry`. The test URL is available in n8n while listening for a test event. The webhook accepts a JSON `POST` body with these fields:
+
+```json
 {
   "name": "Test Customer",
   "email": "customer@example.com",
   "phone": "555-0100",
   "message": "I would like pricing information for your services."
 }
-~~~
+```
 
-Example request for a local n8n instance:
+The webhook returns **HTTP 202 Accepted** immediately and processes asynchronously. That response confirms that n8n accepted the request, **not** that the email was delivered or CRM logging succeeded. Check the n8n execution and Airtable status for the final outcome.
 
-~~~bash
+Local example for an n8n instance running at `http://localhost:5678`:
+
+```bash
 curl -i -X POST http://localhost:5678/webhook/business-inquiry \
   -H 'Content-Type: application/json' \
   -d '{"name":"Test Customer","email":"customer@example.com","phone":"555-0100","message":"I would like pricing information."}'
-~~~
-
-The webhook returns HTTP 202 to acknowledge that the request was accepted for asynchronous processing. It does not guarantee that qualification, CRM logging, or email delivery succeeded. Inspect the n8n execution and Airtable record for the outcome.
+```
 
 ## Classification and routing
 
-The original numeric lead score scale of 1–10 and qualification threshold of 6 or higher are preserved.
+The score scale and qualification threshold are preserved from the original flow: numeric score from 1–10, auto-reply qualification at **6 or higher**. The prompt also requires `category` to be `hot`, `warm`, or `cold`, plus a concise `summary` and `reason`.
 
-| Intent | Behavior |
+| Intent | Action |
 |---|---|
-| sales | Continue through existing score-based qualification |
-| pricing | Continue through score-based qualification; do not invent prices |
-| general | Continue through qualification without an automatic score increase |
-| support | Log and route to human review; no automatic sales reply |
-| spam | Log as suppressed; no customer-facing reply |
-| missing, unknown, or malformed result | Fail closed to manual review |
+| `sales` | Continue through existing score threshold |
+| `pricing` | Continue through existing score threshold; reply must not invent a price |
+| `general` | Continue through existing score threshold; general messages receive no automatic score boost |
+| `support` | Log for manual review; no automated customer email |
+| `spam` | Log with `suppressed_spam`; no automated customer email |
+| Unknown/missing/malformed AI output | Fail closed to manual review |
 
-The qualification output requires score, category, intent, summary, and reason. Reply output must contain non-empty subject and body fields. The reply prompt must not invent prices, policies, guarantees, or unsupported service facts. The signature is generic and no fake booking URL is included.
+The reply prompt is context-constrained: it must not invent pricing, guarantees, business policies, availability, or service facts. The workflow appends the generic `Customer Support Team` signature; there is no fictitious business identity or placeholder booking URL.
 
-## Duplicate-suppression limits
+## Duplicate suppression
 
-Before qualification, the workflow searches Airtable for the normalized email with status replied within the preceding 24 hours. A match is logged as suppressed_duplicate and does not proceed to email delivery.
+Before calling Claude, the workflow searches the configured Airtable table for the normalized lower-case email with status `replied` and a timestamp within the last 24 hours. Matches are logged as `suppressed_duplicate` and do not continue to email delivery.
 
-This is not a global rate limiter, and an Airtable lookup followed by email delivery is not atomic. Concurrent submissions can race, and an ambiguous delivery failure may occur after the mail provider has accepted a message. Automatic Gmail retries are intentionally not enabled to reduce duplicate sends. Review execution errors and Airtable status before retrying a failed inquiry.
+This is **not** a global rate limiter, and Airtable search plus email delivery is not an atomic transaction. Concurrent inquiries can race; a failure after Gmail accepts a message but before the Airtable `replied` record is written can also weaken duplicate detection on a subsequent retry. Gmail is intentionally not auto-retried on ambiguous delivery errors to avoid deliberate duplicate sends; these errors are logged for human review when Airtable is available. If Airtable itself is unavailable, its logging node fails visibly in the n8n execution; the workflow cannot log an Airtable outage back into that same unavailable table.
 
-## Import and configuration
+## Import and configure
 
-1. In n8n, choose Workflows → Import from File and select business-inquiry-auto-reply.json.
-2. Configure Anthropic, Gmail OAuth2, and Airtable credentials in n8n. The workflow export must not contain secret values.
-3. Create an Airtable table named Leads using docs/airtable-schema.md.
-4. Select the same Airtable base and table in the duplicate-check node and all logging nodes.
-5. Review the prompt and signature, then test using controlled inquiries and a controlled recipient.
-6. Keep the optional Gmail trigger disabled until you intentionally configure and enable it.
-7. Activate the workflow only after reviewing successful and failure-path executions.
+1. In n8n, choose **Workflows → Import from File** and import `business-inquiry-auto-reply.json`.
+2. Add/connect credentials for Anthropic, Gmail OAuth2, and Airtable PAT. Credential references in the export contain no secrets.
+3. Create an Airtable table named **Leads** using [`docs/airtable-schema.md`](docs/airtable-schema.md).
+4. Select the same Airtable base and table in **Dupe Check (Airtable)** and the three Airtable log nodes. Configure any single-select fields to accept the listed status/category/intent values.
+5. Use a controlled test recipient first. Confirm Gmail sender identity and the business's approved tone/content in the reply prompt before enabling automatic replies.
+6. Keep **Email Lead (optional)** disabled unless you have selected Gmail credentials and intentionally want it to poll for inbound messages.
+7. Activate the workflow and test the production webhook endpoint. Review each n8n execution and its Airtable record before using real customer data.
 
-## Run local checks
+## Tests
 
-Requires Node.js and Python 3.
+Run the local tests from the project directory:
 
-~~~bash
+```bash
 npm test
 npm run validate
-~~~
+```
 
-These tests validate the exported graph, expression and Code-node syntax, the intent paths, duplicate-check expression, and mocked parsing/routing scenarios. They do not perform a live n8n import or call Anthropic, Gmail, or Airtable. See test-report.md.
+These local tests exercise parsers and routing assumptions with mock data and verify the exported graph. They do **not** simulate Anthropic, Gmail, or Airtable service behavior, and they are not a substitute for importing into a live n8n instance. See [`test-report.md`](test-report.md). No live customer emails are sent by the local tests.
 
-## Changes from upstream
+## Changes relative to upstream
 
-- Added the POST webhook as an additional intake source.
-- Normalized customer data from the existing and new trigger paths.
-- Added required-field validation before AI processing.
-- Extended qualification output with intent, summary, and reason while keeping the existing score/category fields.
-- Added intent routing and a safe path for unknown or malformed outputs.
-- Preserved Airtable-backed duplicate suppression and added suppression logging.
-- Added a reply-output gate and failure outputs for qualification, reply drafting, and email delivery.
-- Removed the fictional business identity and example booking URL from customer-facing reply content.
+- Added `POST /business-inquiry` as a second intake source.
+- Normalized name/email/phone/message from the existing form, email mapping, and webhook body.
+- Added required-field validation before qualification and customer-facing email.
+- Extended the existing Claude qualification schema with `intent`, summary, and reason while retaining the score/category fields.
+- Routed all five intents and added a fallback for unknown/malformed results.
+- Preserved Airtable-backed 24-hour duplicate lookup and added duplicate-suppression logging.
+- Added reply JSON gating and error outputs for qualification, reply drafting, and email delivery.
+- Removed the original sample business identity and fake booking URL.
 
-## Attribution
+## Upstream and license
 
-This project modifies the MIT-licensed workflow from GBAnjos/n8n-lead-agent. The upstream license is retained in LICENSE.
+This is a modification of [GBAnjos/n8n-lead-agent](https://github.com/GBAnjos/n8n-lead-agent). The upstream repository's MIT license is included as `LICENSE`; retain attribution when redistributing the derived workflow.

@@ -881,7 +881,9 @@
             "node": "Parse Qualification",
             "type": "main",
             "index": 0
-          },
+          }
+        ],
+        [
           {
             "node": "Handle Qualification Error",
             "type": "main",
@@ -926,7 +928,9 @@
             "node": "Parse Reply",
             "type": "main",
             "index": 0
-          },
+          }
+        ],
+        [
           {
             "node": "Handle Reply Generation Error",
             "type": "main",
@@ -953,7 +957,9 @@
             "node": "Log Lead — replied",
             "type": "main",
             "index": 0
-          },
+          }
+        ],
+        [
           {
             "node": "Handle Email Delivery Error",
             "type": "main",
@@ -1020,7 +1026,9 @@
             "node": "Dupe Check (Airtable)",
             "type": "main",
             "index": 0
-          },
+          }
+        ],
+        [
           {
             "node": "Log Lead — manual review",
             "type": "main",
